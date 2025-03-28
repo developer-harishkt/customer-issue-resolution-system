@@ -39,6 +39,19 @@ const (
 	Resolved
 )
 
+func (it IssueStatus) String() string {
+	switch it {
+	case Created:
+		return "Created"
+	case InProgress:
+		return "InProgress"
+	case Resolved:
+		return "Resolved"
+	default:
+		return "Unknown"
+	}
+}
+
 type Issue struct {
 	Id          string      `json:"id"`
 	TxnId       string      `json:"txn_id"`
@@ -47,14 +60,17 @@ type Issue struct {
 	Description string      `json:"description"`
 	Email       string      `json:"email"`
 	Status      IssueStatus `json:"status"`
-	// all of these are meta data to track more details of the issue
-	CreatedAt  int64  `json:"created_at"`
-	UpdatedAt  int64  `json:"updated_at"`
-	Resolution string `json:"resolution"`
-	mu         sync.RWMutex
+	Resolution  string      `json:"resolution"`
+	mu          sync.RWMutex
+	// additional fields to track metadata of the issue
+	CreatedAt int64 `json:"created_at"`
+	UpdatedAt int64 `json:"updated_at"`
 }
 
-func NewIssue(id, txnId, subject, description, email string, issueType IssueType) *Issue {
+func NewIssue(id, txnId, subject, description, email string, issueType IssueType) (*Issue, error) {
+	if txnId == "" || subject == "" || description == "" || email == "" {
+		return nil, fmt.Errorf("invalid input")
+	}
 	return &Issue{
 		Id:          id,
 		TxnId:       txnId,
@@ -64,7 +80,7 @@ func NewIssue(id, txnId, subject, description, email string, issueType IssueType
 		Email:       email,
 		Status:      Created,
 		CreatedAt:   time.Now().Unix(),
-	}
+	}, nil
 }
 
 // to get the status of the issue

@@ -18,14 +18,18 @@ func NewIssueService() *IssueService {
 	}
 }
 
-func (is *IssueService) CreateIssue(txnID, subject, description, email string, issueType m.IssueType) string {
+func (is *IssueService) CreateIssue(txnID, subject, description, email string, issueType m.IssueType) (string, error) {
 	is.mu.Lock()
 	defer is.mu.Unlock()
 
 	id := "I" + txnID // in ideal systems we should be using uuid's
-	issue := m.NewIssue(id, txnID, subject, description, email, issueType)
+	issue, err := m.NewIssue(id, txnID, subject, description, email, issueType)
+	if err != nil {
+		fmt.Printf("error occured while creating issue %w \n", err)
+		return "", fmt.Errorf("error occured while creating issue %w", err)
+	}
 	is.Issues[id] = issue
-	return id
+	return id, nil
 }
 
 func (is *IssueService) GetIssue(id string) *m.Issue {
@@ -34,15 +38,14 @@ func (is *IssueService) GetIssue(id string) *m.Issue {
 	return is.Issues[id]
 }
 
-func (is *IssueService) UpdateIssue(issueId, resolution string, status m.IssueStatus) (bool, error) {
+func (is *IssueService) UpdateIssue(issueId, resolution string, status m.IssueStatus) error {
 	is.mu.Lock()
 	defer is.mu.Unlock()
 	if issue, exists := is.Issues[issueId]; exists {
 		issue.UpdateStatus(status, resolution)
-		return true, nil
-	} else {
-		return false, fmt.Errorf("issue with id %s not found", issueId)
+		return nil
 	}
+	return fmt.Errorf("issue with id %s not found", issueId)
 }
 
 func (is *IssueService) GetIssues(filter map[string]string) []*m.Issue {

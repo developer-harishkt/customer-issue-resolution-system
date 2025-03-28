@@ -1,6 +1,7 @@
 package service
 
 import (
+	"container/heap"
 	"fmt"
 	m "iss/internal/models"
 	"sync"
@@ -8,32 +9,42 @@ import (
 )
 
 type AgentService struct {
-	agents          map[string]*m.Agent
-	availableAgents int32
-	idCounter       int32
-	mu              sync.RWMutex
+	agents                     map[string]*m.Agent
+	AvailableAgentsByExpertise map[m.IssueType]map[string]*m.Agent
+	busyAgentHeap              *AgentHeap
+	idCounter                  int32
+	mu                         sync.RWMutex
 }
 
 func NewAgentService() *AgentService {
 	return &AgentService{
-		agents:          make(map[string]*m.Agent),
-		availableAgents: 0,
+		agents:                     make(map[string]*m.Agent),
+		AvailableAgentsByExpertise: make(map[m.IssueType]map[string]*m.Agent),
+		busyAgentHeap:              InitializeHeap(),
 	}
 }
 
-func (as *AgentService) AddAgent(email, name string, expertise []m.IssueType) string {
+func (as *AgentService) AddAgent(email, name string, expertise map[m.IssueType]bool) (string, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
 	id := fmt.Sprintf("A%d", atomic.AddInt32(&as.idCounter, 1))
-	expertiseMap := make(map[m.IssueType]bool)
-	for _, it := range expertise {
-		expertiseMap[it] = true
+	agent, err := m.NewAgent(id, email, name, expertise)
+	if err != nil {
+		fmt.Println("error occurred", err)
+		return "", err
 	}
-	agent := m.NewAgent(id, email, name, expertiseMap)
 	as.agents[id] = agent
-	atomic.AddInt32(&as.availableAgents, 1)
-	return id
+	for expertise, _ := range agent.Expertise {
+		if _, ok := as.AvailableAgentsByExpertise[expertise]; ok {
+			as.AvailableAgentsByExpertise[expertise][agent.Id] = agent
+		} else {
+			as.AvailableAgentsByExpertise[expertise] = map[string]*m.Agent{
+				agent.Id: agent,
+			}
+		}
+	}
+	return id, nil
 }
 
 func (as *AgentService) GetAgent(id string) *m.Agent {
@@ -42,31 +53,46 @@ func (as *AgentService) GetAgent(id string) *m.Agent {
 	return as.agents[id]
 }
 
-func (as *AgentService) GetAgents() []*m.Agent {
+func (as *AgentService) GetAgents() map[string]*m.Agent {
 	as.mu.RLock()
 	defer as.mu.RUnlock()
-
-	agents := make([]*m.Agent, 0, len(as.agents))
-	for _, agent := range as.agents {
-		agents = append(agents, agent)
-	}
-	return agents
+	return as.agents
 }
 
-func (as *AgentService) AssignIssue(agentID string, issue *m.Issue, toPending bool) {
+func (as *AgentService) GetAvailableAgentsByExpertise() map[m.IssueType]map[string]*m.Agent {
+	as.mu.RLock()
+	defer as.mu.RUnlock()
+	return as.AvailableAgentsByExpertise
+}
+
+func (as *AgentService) GetBusyAgentHeap() *AgentHeap {
+	as.mu.RLock()
+	defer as.mu.RUnlock()
+	return as.busyAgentHeap
+}
+
+func (as *AgentService) AssignIssue(agent *m.Agent, issue *m.Issue) (bool, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
-	if agent, exists := as.agents[agentID]; exists {
-		if toPending {
-			agent.AddToPendingIssues(issue)
-		} else {
-			if agent.IsAvailable() {
-				agent.AssignIssue(issue)
-				as.availableAgents--
-			}
+	waitListed := true
+	if agent.IsAvailable() {
+		err := agent.AssignIssue(issue)
+		if err != nil {
+			return false, fmt.Errorf("error occurred %w", err)
+		}
+		for expertise, _ := range agent.GetExpertise() {
+			delete(as.AvailableAgentsByExpertise[expertise], agent.Id)
+		}
+		waitListed = false
+		heap.Push(as.busyAgentHeap, agent)
+	} else {
+		agent.AddToPendingIssues(issue)
+		if agent.HeapIndex >= 0 && agent.HeapIndex < len(*as.busyAgentHeap) && (*as.busyAgentHeap)[agent.HeapIndex] == agent {
+			heap.Push(as.busyAgentHeap, agent)
 		}
 	}
+	return waitListed, nil
 }
 
 func (as *AgentService) GetWorkHistory() map[string][]string {
@@ -85,22 +111,26 @@ func (as *AgentService) GetWorkHistory() map[string][]string {
 	return history
 }
 
-func (s *AgentService) GetAvailableAgents() int32 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.availableAgents
-}
-
-func (as *AgentService) ResolveIssue(agentID, resolution string) {
+func (as *AgentService) ResolveIssue(agentId, resolution string) (*m.Issue, error) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
-	if agent, exists := as.agents[agentID]; exists {
-		if !agent.IsAvailable() {
-			agent.ResolveIssue(resolution)
-			if agent.GetAssignedIssue() == nil && len(agent.GetPendingIssues()) == 0 {
-				atomic.AddInt32(&as.availableAgents, 1)
+	if agent, ok := as.agents[agentId]; ok {
+		newIssueAssigned, err := agent.ResolveIssue(resolution)
+		if err != nil {
+			return nil, err
+		}
+		if newIssueAssigned != nil {
+			heap.Push(as.busyAgentHeap, agent)
+		} else {
+			for expertise, _ := range agent.GetExpertise() {
+				as.AvailableAgentsByExpertise[expertise] = map[string]*m.Agent{
+					agentId: agent,
+				}
 			}
 		}
+		return newIssueAssigned, nil
+	} else {
+		return nil, fmt.Errorf("agent not found")
 	}
 }
