@@ -85,13 +85,11 @@ func (as *AgentService) AssignIssue(agent *m.Agent, issue *m.Issue) (bool, error
 			delete(as.AvailableAgentsByExpertise[expertise], agent.Id)
 		}
 		waitListed = false
-		heap.Push(as.busyAgentHeap, agent)
 	} else {
 		agent.AddToPendingIssues(issue)
-		if agent.HeapIndex >= 0 && agent.HeapIndex < len(*as.busyAgentHeap) && (*as.busyAgentHeap)[agent.HeapIndex] == agent {
-			heap.Push(as.busyAgentHeap, agent)
-		}
 	}
+
+	heap.Push(as.busyAgentHeap, agent)
 	return waitListed, nil
 }
 
@@ -121,7 +119,13 @@ func (as *AgentService) ResolveIssue(agentId, resolution string) (*m.Issue, erro
 			return nil, err
 		}
 		if newIssueAssigned != nil {
-			heap.Push(as.busyAgentHeap, agent)
+			// Agent is still busy, update its position in the heap
+			if agent.HeapIndex >= 0 && agent.HeapIndex < as.busyAgentHeap.Len() {
+				heap.Fix(as.busyAgentHeap, agent.HeapIndex)
+			} else {
+				// Shouldn’t happen if agent was busy, but push as fallback
+				heap.Push(as.busyAgentHeap, agent)
+			}
 		} else {
 			for expertise, _ := range agent.GetExpertise() {
 				as.AvailableAgentsByExpertise[expertise] = map[string]*m.Agent{

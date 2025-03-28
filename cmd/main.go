@@ -40,7 +40,7 @@ func main() {
 
 	testAgents := []models.Agent{
 		{Email: "agent1@test.com", Name: "Agent 1", Expertise: map[models.IssueType]bool{models.Payment: true}},
-		{Email: "agent2@test.com", Name: "Agent 2", Expertise: map[models.IssueType]bool{models.Payment: true}},
+		{Email: "agent2@test.com", Name: "Agent 2", Expertise: map[models.IssueType]bool{models.Payment: true, models.MutualFund: true}},
 		{Email: "agent3@test.com", Name: "Agent 3", Expertise: map[models.IssueType]bool{models.MutualFund: true}},
 		{Email: "agent4@test.com", Name: "Agent 4", Expertise: map[models.IssueType]bool{models.MutualFund: true}},
 	}
@@ -73,8 +73,9 @@ func main() {
 
 	fmt.Println()
 	fmt.Println()
-	// scenario 2: A1 should have min queue length & top of heap, hence T9 should be added to pending list of A1
-	fmt.Println("scenario 2: A1 should have min queue length & top of heap, hence T9 should be added to pending list of A1")
+	// scenario 2: IT's assigned agent (A1/A2 as ordering is not guranteed in the mapping) should have min queue length & top of the heap after IT1 is resolved
+	// hence T9 should be added to pending list of IT's assigned agent (A1/A2)
+	fmt.Println("scenario 2: IT's assigned agent (A1/A2 as ordering is not guranteed in the mapping) should have min queue length & top of the heap after IT1 is resolved hence T9 should be added to pending list of IT's assigned agent (A1/A2)")
 	issueId := "IT1"
 	err := resolutionService.ResolveIssue(issueId, "random-message")
 	if err != nil {
@@ -100,10 +101,11 @@ func main() {
 
 	fmt.Println()
 	fmt.Println()
-	// scenario 3: after resolving all the issues for A2, A2 should be in avaialbleAgentByExpertise
-	fmt.Println("scenario 3: after resolving all the issues for A2, A2 should be in avaialbleAgentByExpertise")
-	issueId = "IT3"
-	err = resolutionService.ResolveIssue(issueId, "random-message")
+
+	// scenario 3: After resolving all issues for A2 (initially assigned IT2), A2 should be in AvailableAgentsByExpertise and take a new Payment task
+	fmt.Println("Scenario 3: After resolving all issues for the agent initially assigned IT2 (e.g., A2), that agent should return to AvailableAgentsByExpertise and take a new Payment task (IT10)")
+	issueId = "IT2"
+	err = resolutionService.ResolveIssue(issueId, "MutualFund issue fixed")
 	if err != nil {
 		fmt.Printf("Error resolving issue %s: %v\n", issueId, err)
 	} else {
@@ -111,14 +113,14 @@ func main() {
 	}
 
 	issueId = "IT7"
-	err = resolutionService.ResolveIssue(issueId, "random-message")
+	err = resolutionService.ResolveIssue(issueId, "Payment reversed")
 	if err != nil {
 		fmt.Printf("Error resolving issue %s: %v\n", issueId, err)
 	} else {
 		fmt.Printf("Issue %s resolved\n", issueId)
 	}
 
-	id, err = resolutionService.CreateIssue("T10", "a", "a", "a", models.Payment)
+	id, err = resolutionService.CreateIssue("T10", "Payment Failed", "Test payment issue", "testUser3@test.com", models.Payment)
 	if err != nil {
 		fmt.Println("Error occurred - CreateIssue:", err)
 		os.Exit(1)
